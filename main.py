@@ -11,7 +11,6 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from google.oauth2.credentials import Credentials
 import io
-from moviepy.editor import ImageClip, TextClip, CompositeVideoClip, VideoFileClip
 import json
 from datetime import datetime
 from googleapiclient.errors import HttpError
@@ -27,9 +26,16 @@ from moviepy.config import change_settings
 import platform
 
 if platform.system() == "Windows":
-    change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"})
+    os.environ["IMAGEMAGICK_BINARY"] = r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"
 else:
-    change_settings({"IMAGEMAGICK_BINARY": "/usr/bin/magick"})
+    # linux fallback
+    if os.path.exists("/usr/bin/magick"):
+        os.environ["IMAGEMAGICK_BINARY"] = "/usr/bin/magick"
+    elif os.path.exists("/usr/bin/convert"):
+        os.environ["IMAGEMAGICK_BINARY"] = "/usr/bin/convert"
+
+
+from moviepy.editor import ImageClip, TextClip, CompositeVideoClip, VideoFileClip
 
 
 YOUTUBE_CLIENT_ID = os.environ.get("YOUTUBE_CLIENT_ID")

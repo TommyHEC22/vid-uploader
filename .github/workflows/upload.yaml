@@ -1,6 +1,9 @@
 name: Auto Video Uploader
 
+# Runs hourly, on push to main (for quick testing), or manually.
 on:
+  schedule:
+    - cron: '0 * * * *'   # every hour at minute 0
   push:
     branches:
       - main
@@ -9,34 +12,58 @@ on:
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     env:
+      # secrets from GitHub (in repository Settings → Secrets)
       YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
       YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
       YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+      PYTHONUNBUFFERED: '1'
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python 3.13.9
         uses: actions/setup-python@v4
         with:
           python-version: '3.13.9'
 
-      - name: Install system dependencies
+      - name: Install system packages (ffmpeg, ImageMagick, fonts)
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y ffmpeg imagemagick fonts-dejavu-core ttf-mscorefonts-installer
-          # show versions for debugging
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            ffmpeg \
+            imagemagick \
+            fonts-dejavu-core \
+            ttf-mscorefonts-installer
+          # debugging info
+          python -V
           ffmpeg -version || true
           magick -version || convert -version || true
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install --no-cache-dir -r requirements.txt
+
+      - name: Create minimal token.json from secret (runner-local)
+        run: |
+          if [ -n "${{ secrets.YT_REFRESH_TOKEN }}" ]; then
+            printf '{"refresh_token":"%s"}' "${{ secrets.YT_REFRESH_TOKEN }}" > token.json
+            echo "token.json written"
+          else
+            echo "No YT_REFRESH_TOKEN secret provided"
+          fi
 
       - name: Run video uploader script
         run: |
           python main.py
+
+      - name: Upload generated videos as artifact (for debugging)
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-videos
+          path: '*.mp4'
+          if-no-files-found: ignore
