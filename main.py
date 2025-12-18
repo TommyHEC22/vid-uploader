@@ -6,7 +6,6 @@ from urllib3.util.retry import Retry
 from urllib.parse import quote
 import os
 import time
-from moviepy.config import change_settings
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from google.oauth2.credentials import Credentials
