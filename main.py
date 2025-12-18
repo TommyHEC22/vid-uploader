@@ -23,9 +23,18 @@ import subprocess
 from datetime import datetime, timedelta
 import logging
 from io import BytesIO
+from moviepy.config import change_settings
+import platform
 
-YOUTUBE_CLIENT_ID = os.environ.get('YOUTUBE_CLIENT_ID')
-YOUTUBE_CLIENT_SECRET = os.environ.get('YOUTUBE_CLIENT_SECRET')
+if platform.system() == "Windows":
+    change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"})
+else:
+    change_settings({"IMAGEMAGICK_BINARY": "/usr/bin/magick"})
+
+
+YOUTUBE_CLIENT_ID = os.environ.get("YOUTUBE_CLIENT_ID")
+YOUTUBE_CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET") 
+REFRESH_TOKEN_ENV = os.environ.get("YT_REFRESH_TOKEN")        
 TOKEN_FILE = "token.json"
 
 change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"})
@@ -141,12 +150,16 @@ def create_quote_video(image_path, quotes, author):
     return output_filename
 
 def get_youtube_tokens(filename=TOKEN_FILE):
-    """Load YouTube tokens from local file"""
-    if not os.path.exists(filename):
+    """Load YouTube tokens from local file or fallback to GH Actions secret"""
+    if os.path.exists(filename):
+        with open(filename, "r", encoding="utf-8") as f:
+            return json.load(f)
+    elif REFRESH_TOKEN_ENV:  # fallback to the env secret
+        return {
+            "refresh_token": REFRESH_TOKEN_ENV
+        }
+    else:
         return None
-
-    with open(filename, "r", encoding="utf-8") as f:
-        return json.load(f)
 
 
 def save_youtube_tokens(tokens, filename=TOKEN_FILE):
@@ -190,32 +203,45 @@ def refresh_youtube_token(refresh_token):
 
 
 def get_valid_youtube_token():
-    """Return a valid YouTube access token, refreshing if needed"""
+    """Return a valid access token string — refreshes using available refresh token if needed."""
     tokens = get_youtube_tokens()
 
+    # If no tokens file but we have REFRESH_TOKEN_ENV, try to refresh using env
     if not tokens:
+        if REFRESH_TOKEN_ENV:
+            new = refresh_youtube_token(REFRESH_TOKEN_ENV)
+            return new["access_token"] if new else None
         return None
 
+    # If tokens exists but lacks access_token/expires_at -> try refresh
     if "access_token" not in tokens or "expires_at" not in tokens:
-        return None
+        refresh_token = tokens.get("refresh_token") or REFRESH_TOKEN_ENV
+        if not refresh_token:
+            return None
+        new = refresh_youtube_token(refresh_token)
+        return new["access_token"] if new else None
 
+    # tokens contains expires_at — check expiry
     try:
         expires_at = datetime.fromisoformat(tokens["expires_at"])
-    except ValueError:
-        return None
+    except Exception:
+        refresh_token = tokens.get("refresh_token") or REFRESH_TOKEN_ENV
+        if not refresh_token:
+            return None
+        new = refresh_youtube_token(refresh_token)
+        return new["access_token"] if new else None
 
-    # 5-minute safety buffer
+    # If about to expire, refresh
     if expires_at <= datetime.utcnow() + timedelta(minutes=5):
-        if "refresh_token" not in tokens:
+        refresh_token = tokens.get("refresh_token") or REFRESH_TOKEN_ENV
+        if not refresh_token:
             return None
+        new = refresh_youtube_token(refresh_token)
+        return new["access_token"] if new else None
 
-        new_tokens = refresh_youtube_token(tokens["refresh_token"])
-        if not new_tokens:
-            return None
-
-        return new_tokens["access_token"]
-
+    # Otherwise the token is valid
     return tokens["access_token"]
+
 
 
 def upload_to_youtube(video_path, quote_text, author, category):
@@ -228,16 +254,20 @@ def upload_to_youtube(video_path, quote_text, author, category):
         raise RuntimeError("No valid access token available")
 
     tokens = get_youtube_tokens()
-    if not tokens or "refresh_token" not in tokens:
-        raise RuntimeError("No refresh token available; reauthorize required")
+# prefer token file value, fallback to env secret
+    refresh_token = (tokens.get("refresh_token") if tokens else None) or REFRESH_TOKEN_ENV
+
+    if not refresh_token:
+        raise RuntimeError("No refresh token available; reauthorize or set YT_REFRESH_TOKEN secret.")
 
     creds = Credentials(
         token=access_token,
-        refresh_token=tokens["refresh_token"],
+        refresh_token=refresh_token,
         client_id=YOUTUBE_CLIENT_ID,
         client_secret=YOUTUBE_CLIENT_SECRET,
         token_uri="https://oauth2.googleapis.com/token",
     )
+
 
     youtube = build("youtube", "v3", credentials=creds)
 
