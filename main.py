@@ -22,13 +22,18 @@ import subprocess
 from datetime import datetime, timedelta
 import logging
 from io import BytesIO
-from moviepy.config import change_settings
 import platform
+import moviepy
+
+print("moviepy version:", getattr(moviepy, "__version__", "unknown"))
+print("IMAGEMAGICK_BINARY env:", os.environ.get("IMAGEMAGICK_BINARY"))
+subprocess.run(["/usr/bin/magick", "-version"], check=False)
+subprocess.run(["/usr/bin/convert", "-version"], check=False)
 
 if platform.system() == "Windows":
     os.environ["IMAGEMAGICK_BINARY"] = r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"
 else:
-    # linux fallback
+    # Prefer magick, fall back to convert if present
     if os.path.exists("/usr/bin/magick"):
         os.environ["IMAGEMAGICK_BINARY"] = "/usr/bin/magick"
     elif os.path.exists("/usr/bin/convert"):
@@ -43,7 +48,6 @@ YOUTUBE_CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET")
 REFRESH_TOKEN_ENV = os.environ.get("YT_REFRESH_TOKEN")        
 TOKEN_FILE = "token.json"
 
-change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"})
 
 with open("love_quotes.csv", newline="", encoding="utf-8") as infile:
     reader = csv.reader(infile)
