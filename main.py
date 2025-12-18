@@ -23,20 +23,30 @@ import logging
 from io import BytesIO
 import platform
 import moviepy
+import shutil
+import subprocess
 
-print("moviepy version:", getattr(moviepy, "__version__", "unknown"))
-print("IMAGEMAGICK_BINARY env:", os.environ.get("IMAGEMAGICK_BINARY"))
-subprocess.run(["/usr/bin/magick", "-version"], check=False)
-subprocess.run(["/usr/bin/convert", "-version"], check=False)
-
+# Prefer Windows path if on Windows, otherwise detect magick or convert on Linux
 if platform.system() == "Windows":
     os.environ["IMAGEMAGICK_BINARY"] = r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"
 else:
-    # Prefer magick, fall back to convert if present
-    if os.path.exists("/usr/bin/magick"):
-        os.environ["IMAGEMAGICK_BINARY"] = "/usr/bin/magick"
-    elif os.path.exists("/usr/bin/convert"):
-        os.environ["IMAGEMAGICK_BINARY"] = "/usr/bin/convert"
+    magick_path = shutil.which("magick")
+    convert_path = shutil.which("convert")
+    if magick_path:
+        os.environ["IMAGEMAGICK_BINARY"] = magick_path
+    elif convert_path:
+        os.environ["IMAGEMAGICK_BINARY"] = convert_path
+    else:
+        # leave unset — moviepy may still work with imageio fallback; we will warn
+        os.environ.pop("IMAGEMAGICK_BINARY", None)
+
+# Debugging information (safe: only call binaries if they exist)
+print("Platform:", platform.system())
+print("IMAGEMAGICK_BINARY env:", os.environ.get("IMAGEMAGICK_BINARY"))
+if os.environ.get("IMAGEMAGICK_BINARY"):
+    subprocess.run([os.environ["IMAGEMAGICK_BINARY"], "-version"], check=False)
+else:
+    print("No ImageMagick binary found on PATH (magick/convert).")
 
 
 from moviepy.editor import ImageClip, TextClip, CompositeVideoClip, VideoFileClip
