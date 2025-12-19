@@ -73,32 +73,41 @@ with open("love_quotes.csv", newline="", encoding="utf-8") as infile:
 
 
 def save_author_image(author):
+    """
+    Generate an AI portrait for `author`.
+
+    HARD FAIL BEHAVIOR:
+    - On any failure (403, network error, invalid response), terminates process with os._exit(1).
+    - Intended for CI (GitHub Actions) where failure should stop the workflow immediately.
+    """
+    import base64
+    import os
+    import requests
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    import shutil
+
     print(f"Generating AI portrait for: {author}")
 
     session = requests.Session()
-
     session.headers.update({
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/120.0.0.0 Safari/537.36"
         ),
-        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Accept": "application/json, image/*;q=0.9, */*;q=0.8",
         "Referer": "https://pollinations.ai/",
     })
 
-    # IMPORTANT:
-    # 403 should NOT be retried (WAF / permanent denial)
     retry_strategy = Retry(
-        total=4,
+        total=3,
         backoff_factor=2,
         status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET"],
+        allowed_methods=["POST", "GET"],
         raise_on_status=False,
     )
-
-    adapter = HTTPAdapter(max_retries=retry_strategy)
-    session.mount("https://", adapter)
+    session.mount("https://", HTTPAdapter(max_retries=retry_strategy))
 
     prompt = (
         f"Professional oil painting of the person {author}, "
@@ -107,49 +116,127 @@ def save_author_image(author):
     )
 
     seed = os.urandom(4).hex()
+    width, height = 720, 1280
 
-    base_url = "https://image.pollinations.ai/p"
+    POLLINATIONS_TOKEN = os.environ.get("POLLINATIONS_TOKEN")
 
-    # Let requests encode parameters safely (NO quote())
-    params = {
-        "width": 720,
-        "height": 1280,
-        "seed": seed,
-        "nologo": "true",
-    }
+    def fail(reason, resp=None):
+        print("AI image generation FAILED")
+        print("REASON:", reason)
+        if resp is not None:
+            print("STATUS:", resp.status_code)
+            if "CF-Ray" in resp.headers:
+                print("CF-Ray:", resp.headers.get("CF-Ray"))
+            print("HEADERS:", dict(resp.headers))
+            try:
+                print("BODY PREVIEW:", resp.text[:800])
+            except Exception:
+                print("BODY PREVIEW: <binary data>")
+        os._exit(1)
 
-    try:
-        response = session.get(
-            f"{base_url}/{prompt}",
-            params=params,
-            timeout=60,
-        )
-
-        # ---- DEBUG LOGGING (CRITICAL FOR GITHUB ACTIONS) ----
-        if response.status_code != 200:
-            print("Image generation failed")
-            print("STATUS:", response.status_code)
-            print("HEADERS:", dict(response.headers))
-            print("BODY PREVIEW:", response.text[:500])
-            response.raise_for_status()
-
-        if not response.content or len(response.content) < 1024:
-            raise RuntimeError("Received empty or invalid image data")
-
-        safe_name = author.replace(" ", "_").lower()
-        filename = f"{safe_name}_ai.jpg"
-
+    def save_bytes(bts, filename):
         with open(filename, "wb") as f:
-            f.write(response.content)
-
-        print(f"Successfully generated: {filename}")
+            f.write(bts)
         return filename
 
+    def download_url(url, filename):
+        try:
+            r = session.get(url, stream=True, timeout=30)
+            r.raise_for_status()
+            with open(filename, "wb") as fd:
+                shutil.copyfileobj(r.raw, fd)
+            return filename
+        except Exception as e:
+            fail(f"Failed downloading image from URL: {e}")
+
+    # -------- Preferred: POST with token --------
+    if POLLINATIONS_TOKEN:
+        endpoint = "https://enter.pollinations.ai/api/generate"
+        session.headers["Authorization"] = f"Bearer {POLLINATIONS_TOKEN}"
+        payload = {
+            "prompt": prompt,
+            "width": width,
+            "height": height,
+            "seed": seed,
+            "n_images": 1,
+            "nologo": True,
+        }
+
+        try:
+            resp = session.post(endpoint, json=payload, timeout=60)
+        except Exception as e:
+            fail(f"POST request to Pollinations failed: {e}")
+
+        if resp.status_code == 403:
+            fail("403 Unauthorized from Pollinations POST (check token or IP allowlist)", resp)
+
+        if not resp.ok:
+            fail("Non-OK response from Pollinations POST", resp)
+
+        content_type = resp.headers.get("Content-Type", "")
+
+        try:
+            if "application/json" in content_type or resp.text.strip().startswith("{"):
+                j = resp.json()
+                if isinstance(j, dict):
+                    if j.get("url"):
+                        filename = f"{author.replace(' ', '_').lower()}_ai.jpg"
+                        out = download_url(j["url"], filename)
+                        print(f"Successfully generated: {out}")
+                        return out
+
+                    b64data = None
+                    if j.get("image") and isinstance(j["image"], str) and j["image"].startswith("data:"):
+                        b64data = j["image"].split(",", 1)[1]
+                    elif j.get("b64"):
+                        b64data = j["b64"]
+                    elif j.get("b64_json"):
+                        b64data = j["b64_json"]
+
+                    if b64data:
+                        decoded = base64.b64decode(b64data)
+                        filename = f"{author.replace(' ', '_').lower()}_ai.jpg"
+                        save_bytes(decoded, filename)
+                        print(f"Successfully generated: {filename}")
+                        return filename
+
+                fail("JSON response did not contain image data", resp)
+
+            # Raw image bytes
+            if resp.content and len(resp.content) > 512:
+                filename = f"{author.replace(' ', '_').lower()}_ai.jpg"
+                save_bytes(resp.content, filename)
+                print(f"Successfully generated: {filename}")
+                return filename
+
+            fail("Unknown Pollinations POST response format", resp)
+
+        except Exception as e:
+            fail(f"Error handling Pollinations POST response: {e}", resp)
+
+    # -------- Fallback: legacy GET (expected to fail on GH Actions) --------
+    base_url = "https://image.pollinations.ai/p"
+    params = {"width": width, "height": height, "seed": seed, "nologo": "true"}
+
+    try:
+        resp = session.get(f"{base_url}/{prompt}", params=params, timeout=60)
     except Exception as e:
-        print(f"AI generation failed for {author}")
-        print("ERROR:", str(e))
-        os._exit(1)
-        return None
+        fail(f"Legacy GET request failed: {e}")
+
+    if resp.status_code == 403:
+        fail("403 Unauthorized from legacy GET (Cloudflare/WAF blocking)", resp)
+
+    if not resp.ok:
+        fail("Non-OK response from legacy GET", resp)
+
+    if resp.content and len(resp.content) > 512:
+        filename = f"{author.replace(' ', '_').lower()}_ai.jpg"
+        save_bytes(resp.content, filename)
+        print(f"Successfully generated (legacy GET): {filename}")
+        return filename
+
+    fail("Legacy GET returned empty or invalid image data", resp)
+
 
 
 
