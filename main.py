@@ -176,7 +176,6 @@ def create_quote_video(image_path, quotes, author):
          - fallback heuristic
         """
         try:
-            # Pillow >= 8 has textbbox
             bbox = draw.textbbox((0, 0), text, font=font)
             w = bbox[2] - bbox[0]
             h = bbox[3] - bbox[1]
@@ -184,13 +183,11 @@ def create_quote_video(image_path, quotes, author):
         except Exception:
             pass
         try:
-            # older Pillow may have textsize on ImageDraw
             ts = draw.textsize(text, font=font)
             return ts[0], ts[1]
         except Exception:
             pass
         try:
-            # ImageFont.getsize
             gs = font.getsize(text)
             return gs[0], gs[1]
         except Exception:
@@ -202,12 +199,11 @@ def create_quote_video(image_path, quotes, author):
             return w, h
         except Exception:
             pass
-        # last resort heuristic
         return (max(1, len(text)) * getattr(font, "size", 12), getattr(font, "size", 12))
 
     # Render text to a temporary PNG using Pillow (auto-fit)
     def render_text_to_png(text, font_path, max_width_px, max_height_px,
-                           initial_font=40, min_font=14, padding=36, line_spacing_mult=1.12):
+                           initial_font=18, min_font=12, padding=36, line_spacing_mult=1.12):
         """
         Returns path to a temporary PNG with transparent background containing the rendered `text`.
         Auto-shrinks font to fit within max_height_px if needed.
@@ -244,7 +240,6 @@ def create_quote_video(image_path, quotes, author):
 
             # compute total height
             lines = wrapped.split("\n")
-            # measure sample line height
             _, sample_h = measure_text(draw, "Ay", font)
             line_height = int(sample_h * line_spacing_mult)
             total_h = padding * 2 + line_height * len(lines)
@@ -255,10 +250,8 @@ def create_quote_video(image_path, quotes, author):
                 break
 
         # Build final image
-        # ensure draw exists for final measurement
         img_w = max_width_px + padding * 2
         lines = chosen_wrapped.split("\n")
-        # compute final line height
         sample_img = Image.new("RGBA", (img_w, 10), (0, 0, 0, 0))
         draw = ImageDraw.Draw(sample_img)
         _, sample_h = measure_text(draw, "Ay", chosen_font)
@@ -272,12 +265,10 @@ def create_quote_video(image_path, quotes, author):
         for line in lines:
             w, h = measure_text(draw, line, chosen_font)
             x = (img_w - w) // 2
-            # Pillow stroke support (newer versions)
             try:
                 draw.text((x, y), line, font=chosen_font, fill=(255, 255, 255, 255),
                           stroke_width=2, stroke_fill=(0, 0, 0, 230))
             except TypeError:
-                # Fallback manual outline
                 for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1), (0, -1), (0, 1), (-1, 0), (1, 0)]:
                     draw.text((x + dx, y + dy), line, font=chosen_font, fill=(0, 0, 0, 200))
                 draw.text((x, y), line, font=chosen_font, fill=(255, 255, 255, 255))
@@ -288,8 +279,8 @@ def create_quote_video(image_path, quotes, author):
         tmpf.close()
         return tmpf.name
 
-    # Determine maximum text box size relative to background
-    max_text_width = int(bg_clip.w * 0.80)
+    # Determine maximum text box size relative to background (wider than before)
+    max_text_width = int(bg_clip.w * 0.90)   # increased from 0.80
     max_text_height = int(bg_clip.h * 0.65)
     png_path = None
     final_video = None
@@ -300,8 +291,8 @@ def create_quote_video(image_path, quotes, author):
             font_path=font_path,
             max_width_px=max_text_width,
             max_height_px=max_text_height,
-            initial_font=36,
-            min_font=14,
+            initial_font=18,   # halved starting size
+            min_font=12,
             padding=32
         )
 
