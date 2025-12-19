@@ -119,93 +119,230 @@ def save_author_image(author):
         os._exit(1)
         return None
 
+import textwrap
+
+def wrap_text_for_label(text, max_chars):
+    return "\n".join(
+        textwrap.fill(
+            line,
+            width=max_chars,
+            break_long_words=False,
+            break_on_hyphens=False
+        )
+        for line in text.split("\n")
+    )
+
 
 def create_quote_video(image_path, quotes, author):
+    import textwrap
+    import tempfile
+    import subprocess
+
     print(f"Creating video for: {author}")
-    
+
     # 1. Select a random audio file
-    audio_folder = "audio" 
+    audio_folder = "audio"
     random_index = random.randint(1, 19)
     audio_source_path = os.path.join(audio_folder, f"{random_index}.mp4")
-    
+
     video_with_audio = VideoFileClip(audio_source_path)
     audio_clip = video_with_audio.audio
     duration = audio_clip.duration
 
     # 2. Create the Background Image Clip
-    # v2.x use: .with_duration()
     bg_clip = ImageClip(image_path).with_duration(duration)
 
     # choose font and desired max width on the background image
     font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
     if not os.path.exists(font_path):
-        # try a fallback (adjust for your runner)
         font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
     max_text_width = int(bg_clip.w * 0.80)
-    font_size = 36
+    initial_font_size = 36
+    min_font_size = 18
     caption = f'"{quotes}"\n\n— {author}'
 
-    # Render the caption to a PNG using ImageMagick (explicitly disable hyphenation/word-break)
-    txt_tmp = tempfile.NamedTemporaryFile(delete=False, mode="w", encoding="utf-8", suffix=".txt")
-    txt_tmp.write(caption)
-    txt_tmp.close()
-
-    out_png = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    out_png.close()
-
-    # prefer IMAGEMAGICK_BINARY if set
-    im_bin = os.environ.get("IMAGEMAGICK_BINARY", "convert")
-
-    # build command: use "caption:@file" to read caption text from file and -define to stop hyphenation
-    cmd = [
-        im_bin,
-        "-size", f"{max_text_width}x",            # width x (height unspecified -> auto)
-        "-background", "none",
-        "-fill", "white",
-        "-font", font_path,
-        "-pointsize", str(font_size),
-        "-gravity", "center",
-        "-define", "caption:word-break=false",
-        "-define", "caption:hyphenate=false",
-        f"caption:@{txt_tmp.name}",
-        out_png.name
-    ]
+    # Prepare temp files (we'll clean them up later)
+    txt_tmp = None
+    out_png = None
+    used_imagemagick = False
 
     try:
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
-    except subprocess.CalledProcessError as e:
-        print("ImageMagick failed:", e.stderr.decode(errors="ignore"))
-        # fallback: try without the -define flags (less ideal)
-        fallback_cmd = cmd[:]
+        # --- Attempt 1: Use ImageMagick convert with caption:@file (preserves old look)
         try:
-            subprocess.run(fallback_cmd, check=True, timeout=30)
-        except Exception as e2:
-            print("ImageMagick fallback also failed:", e2)
-            raise
+            txt_tmp = tempfile.NamedTemporaryFile(delete=False, mode="w", encoding="utf-8", suffix=".txt")
+            txt_tmp.write(caption)
+            txt_tmp.close()
 
-    # Now use the generated PNG as an ImageClip (no TextClip at all)
-    text_img_clip = ImageClip(out_png.name).with_duration(duration).with_position("center")
+            out_png = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+            out_png.close()
 
-    # assemble final
-    final_video = CompositeVideoClip([bg_clip, text_img_clip])
-    final_video = final_video.with_audio(audio_clip)
+            im_bin = os.environ.get("IMAGEMAGICK_BINARY", "convert")
 
-    # 5. Add Fade-In Effect
-    # v2.x uses a list of effects via .with_effects()
-    final_video = final_video.with_effects([vfx.FadeIn(1.5)])
+            cmd = [
+                im_bin,
+                "-size", f"{max_text_width}x",
+                "-background", "none",
+                "-fill", "white",
+                "-font", font_path,
+                "-pointsize", str(initial_font_size),
+                "-gravity", "center",
+                "-define", "caption:word-break=false",
+                "-define", "caption:hyphenate=false",
+                f"caption:@{txt_tmp.name}",
+                out_png.name
+            ]
 
-    # 6. Export
-    output_filename = f"{author.replace(' ', '_').lower()}_short.mp4"
-    final_video.write_videofile(output_filename, fps=24, codec="libx264")
-    
-    # Clean up
-    video_with_audio.close()
-    final_video.close()
-    bg_clip.close()
-    audio_clip.close()
-    
+            # Run convert — this will often fail on locked-down CI (policy.xml)
+            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+            used_imagemagick = True
+
+        except subprocess.CalledProcessError as e:
+            # Common on GitHub Actions (security policy) or other IM failures.
+            stderr = e.stderr.decode(errors="ignore") if hasattr(e, "stderr") and e.stderr else str(e)
+            print("ImageMagick failed:", stderr.strip())
+            # fall through to fallback strategy below
+
+        except Exception as e:
+            # Any other exception running convert -> fallback
+            print("ImageMagick invocation error:", str(e))
+
+        # If ImageMagick worked and produced a PNG, use it
+        if used_imagemagick and out_png and os.path.exists(out_png.name):
+            text_img_clip = ImageClip(out_png.name).with_duration(duration).with_position("center")
+
+        else:
+            # --- Fallback: manual wrapping + TextClip(method='label') — CI-safe
+            # Helper to wrap text without breaking words/hyphens
+            def wrap_text_for_label(text, max_width_px, font_size):
+                # Estimate chars per line from font_size heuristics:
+                avg_char_px = max(7, int(font_size * 0.55))  # heuristic
+                chars_per_line = max(20, int(max_width_px / avg_char_px))
+                wrapped = "\n".join(
+                    textwrap.fill(line, width=chars_per_line,
+                                  break_long_words=False, break_on_hyphens=False)
+                    for line in text.split("\n")
+                )
+                return wrapped
+
+            # Try progressively smaller font sizes until the TextClip height fits a portion of bg
+            target_max_height = int(bg_clip.h * 0.65)
+
+            text_img_clip = None
+            font_size = initial_font_size
+            last_exception = None
+
+            while font_size >= min_font_size:
+                wrapped = wrap_text_for_label(caption, max_text_width, font_size)
+
+                # Try creating TextClip with a couple of fontsize kw names, fall back to no fontsize
+                created = False
+                tried_variants = []
+
+                for fs_kw in ("fontsize", "font_size", None):
+                    kw = {
+                        "font": font_path,
+                        "color": "white",
+                        "stroke_color": "black",
+                        "stroke_width": 1,
+                        "method": "label",
+                        "size": (max_text_width, None),
+                        "align": "center",
+                    }
+                    if fs_kw:
+                        kw[fs_kw] = font_size
+
+                    try:
+                        # TextClip accepts text as first arg
+                        clip = TextClip(wrapped, **kw)
+                    except TypeError as e:
+                        last_exception = e
+                        tried_variants.append(repr(fs_kw))
+                        continue
+                    except Exception as e:
+                        last_exception = e
+                        tried_variants.append(repr(fs_kw))
+                        continue
+
+                    # If created, check height — prefer the clip that fits under target_max_height
+                    try:
+                        clip_h = clip.h if hasattr(clip, "h") and clip.h is not None else (clip.size[1] if hasattr(clip, "size") else None)
+                        if clip_h is None or clip_h <= target_max_height:
+                            text_img_clip = clip.with_duration(duration).with_position("center")
+                            created = True
+                            break
+                        else:
+                            # too tall — close and try smaller font
+                            try:
+                                clip.close()
+                            except Exception:
+                                pass
+                    except Exception:
+                        # couldn't measure, accept it and continue (safer to use)
+                        text_img_clip = clip.with_duration(duration).with_position("center")
+                        created = True
+                        break
+
+                if created:
+                    break
+
+                font_size -= 2  # shrink and retry
+
+            if text_img_clip is None:
+                # As a last resort, try a minimal TextClip without fontsize kwargs
+                try:
+                    wrapped = wrap_text_for_label(caption, max_text_width, min_font_size)
+                    clip = TextClip(wrapped, font=font_path, color="white", stroke_color="black",
+                                    stroke_width=1, method="label", size=(max_text_width, None), align="center")
+                    text_img_clip = clip.with_duration(duration).with_position("center")
+                except Exception as e:
+                    # nothing worked: raise the last exception with context
+                    raise RuntimeError("Failed to create a caption (ImageMagick & TextClip fallback both failed). Last error: " + repr(last_exception or e))
+
+        # Now assemble final video
+        final_video = CompositeVideoClip([bg_clip, text_img_clip])
+        final_video = final_video.with_audio(audio_clip)
+
+        # Add Fade-In Effect
+        final_video = final_video.with_effects([vfx.FadeIn(1.5)])
+
+        # Export
+        safe_author = author.replace(" ", "_").lower()
+        output_filename = f"{safe_author}_short.mp4"
+        final_video.write_videofile(output_filename, fps=24, codec="libx264")
+
+    finally:
+        # Clean up temp files and clips
+        try:
+            video_with_audio.close()
+        except Exception:
+            pass
+        try:
+            final_video.close()
+        except Exception:
+            pass
+        try:
+            bg_clip.close()
+        except Exception:
+            pass
+        try:
+            audio_clip.close()
+        except Exception:
+            pass
+        # remove temp files if they exist
+        try:
+            if txt_tmp and os.path.exists(txt_tmp.name):
+                os.remove(txt_tmp.name)
+        except Exception:
+            pass
+        try:
+            if out_png and os.path.exists(out_png.name):
+                os.remove(out_png.name)
+        except Exception:
+            pass
+
     return output_filename
+
 
 def get_youtube_tokens(filename=TOKEN_FILE):
     """Load YouTube tokens from local file or fallback to GH Actions secret"""
