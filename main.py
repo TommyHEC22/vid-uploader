@@ -51,10 +51,16 @@ else:
 
 from moviepy import ImageClip, TextClip, CompositeVideoClip, VideoFileClip, vfx
 
+def require_env(name):
+    val = os.getenv(name)
+    if not val:
+        raise RuntimeError(f"Missing required env var: {name}")
+    return val
 
-YOUTUBE_CLIENT_ID = os.environ.get("YOUTUBE_CLIENT_ID")
-YOUTUBE_CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET") 
-REFRESH_TOKEN_ENV = os.environ.get("YT_REFRESH_TOKEN")        
+YOUTUBE_CLIENT_ID = require_env("YOUTUBE_CLIENT_ID")
+YOUTUBE_CLIENT_SECRET = require_env("YOUTUBE_CLIENT_SECRET")
+REFRESH_TOKEN_ENV = require_env("YT_REFRESH_TOKEN")
+        
 TOKEN_FILE = "token.json"
 
 
@@ -186,7 +192,7 @@ def save_youtube_tokens(tokens, filename=TOKEN_FILE):
 
 
 def refresh_youtube_token(refresh_token):
-    """Refresh YouTube access token"""
+    """Refresh YouTube access token — returns new token dict or None"""
     data = {
         "client_id": YOUTUBE_CLIENT_ID,
         "client_secret": YOUTUBE_CLIENT_SECRET,
@@ -194,16 +200,33 @@ def refresh_youtube_token(refresh_token):
         "grant_type": "refresh_token",
     }
 
-    response = requests.post(
-        "https://oauth2.googleapis.com/token",
-        data=data,
-        timeout=10,
-    )
-
-    if response.status_code != 200:
+    try:
+        response = requests.post(
+            "https://oauth2.googleapis.com/token",
+            data=data,
+            timeout=10,
+        )
+    except Exception as e:
+        print("Token refresh request failed (network):", e)
         return None
 
-    token_data = response.json()
+    if response.status_code != 200:
+        print("Token refresh failed:", response.status_code)
+        try:
+            print("Response body:", response.text)
+        except Exception:
+            pass
+        return None
+
+    try:
+        token_data = response.json()
+    except Exception as e:
+        print("Token refresh returned non-json body:", e)
+        return None
+
+    if "access_token" not in token_data:
+        print("Token response missing access_token:", token_data)
+        return None
 
     new_tokens = {
         "access_token": token_data["access_token"],
@@ -215,8 +238,10 @@ def refresh_youtube_token(refresh_token):
         "token_type": token_data.get("token_type", "Bearer"),
     }
 
+    # Save ephemeral token.json in workspace (optional; OK to keep)
     save_youtube_tokens(new_tokens)
     return new_tokens
+
 
 
 def get_valid_youtube_token():

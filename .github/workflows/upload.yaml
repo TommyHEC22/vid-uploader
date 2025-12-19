@@ -1,21 +1,10 @@
-name: Auto Video Uploader
-
-# Runs hourly, on push to main (for quick testing), or manually.
-on:
-  schedule:
-    - cron: '0 * * * *'   # every hour at minute 0
-  push:
-    branches:
-      - main
-  workflow_dispatch:
-
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     env:
-      # secrets from GitHub (in repository Settings → Secrets)
+      # must exist in repo Settings -> Secrets
       YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
       YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
       YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
@@ -26,43 +15,22 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python 3.13.9
-        uses: actions/setup-python@v5 # Updated to v5 (recommended for Python 3.13)
+        uses: actions/setup-python@v5
         with:
           python-version: '3.13.9'
 
       - name: Install system packages (ffmpeg, ImageMagick, fonts)
         run: |
           sudo apt-get update -y
-          # Accept MS Font EULA automatically
           echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            ffmpeg \
-            imagemagick \
-            fonts-dejavu-core \
-            ttf-mscorefonts-installer
-          
-          # Fix ImageMagick Policy
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg imagemagick fonts-dejavu-core ttf-mscorefonts-installer
           sudo sed -i '/<policy domain="coder" rights="none" pattern="LABEL" \/>/c\<policy domain="coder" rights="read|write" pattern="LABEL" \/>' /etc/ImageMagick-6/policy.xml
-          
-          # Debug: List available DejaVu fonts to confirm the path
           find /usr/share/fonts -name "*.ttf"
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          # Force installation of MoviePy 2.0.0 if not specified in requirements.txt
           pip install --no-cache-dir -r requirements.txt
-
-      - name: Create token.json from secret
-        run: |
-          if [ -n "${{ secrets.YT_CONF_JSON }}" ]; then
-            printf '%s' "${{ secrets.YT_CONF_JSON }}" > token.json
-            echo "token.json created from YT_CONF_JSON."
-          else
-            echo "Error: YT_CONF_JSON secret is missing!"
-            exit 1
-          fi
-
 
       - name: Run video uploader script
         run: |
