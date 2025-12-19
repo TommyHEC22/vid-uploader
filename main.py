@@ -49,7 +49,7 @@ else:
     print("No ImageMagick binary found on PATH (magick/convert).")
 
 
-from moviepy import ImageClip, TextClip, CompositeVideoClip, VideoFileClip
+from moviepy import ImageClip, TextClip, CompositeVideoClip, VideoFileClip, vfx
 
 
 YOUTUBE_CLIENT_ID = os.environ.get("YOUTUBE_CLIENT_ID")
@@ -117,49 +117,47 @@ def save_author_image(author):
 def create_quote_video(image_path, quotes, author):
     print(f"Creating video for: {author}")
     
-    # 1. Select a random audio file from your folder (1.mp4 to 19.mp4)
-    # Adjust 'audio_folder' path to where your 19 files are
+    # 1. Select a random audio file
     audio_folder = "audio" 
     random_index = random.randint(1, 19)
     audio_source_path = os.path.join(audio_folder, f"{random_index}.mp4")
     
-    # Extract audio from the mp4
     video_with_audio = VideoFileClip(audio_source_path)
     audio_clip = video_with_audio.audio
     duration = audio_clip.duration
 
     # 2. Create the Background Image Clip
-    # Ensure it's the same duration as the audio
-    bg_clip = ImageClip(image_path).set_duration(duration)
+    # v2.x use: .with_duration()
+    bg_clip = ImageClip(image_path).with_duration(duration)
     
     # 3. Create the Text Overlay
-    # 'method=caption' wraps text automatically. 
-    # 'stroke_color' and 'stroke_width' create the thin black outline.
+    # v2.x use: .with_duration() and .with_position()
     text_clip = TextClip(
-        txt=f'"{quotes}"\n\n— {author}',
-        fontsize=30,
+        text=f'"{quotes}"\n\n— {author}',
+        font_size=30,             # fontsize -> font_size
         color='white',
-        font='Arial-Bold',
+        font='DejaVu-Sans-Bold',
         stroke_color='black',
         stroke_width=0.5,
         method='caption',
-        size=(bg_clip.w * 0.65, None), # Text fills 65% of width
-        align='center'
-    ).set_duration(duration).set_position('center')
+        size=(bg_clip.w * 0.65, None),
+        text_align='center'       # align -> text_align
+    ).with_duration(duration).with_position('center')
 
     # 4. Assemble the Video
+    # v2.x use: .with_audio()
     final_video = CompositeVideoClip([bg_clip, text_clip])
-    final_video = final_video.set_audio(audio_clip)
+    final_video = final_video.with_audio(audio_clip)
 
-    # 5. Add Fade-In Effect from Black
-    # 2-second fade in
-    final_video = final_video.fadein(1.5)
+    # 5. Add Fade-In Effect
+    # v2.x uses a list of effects via .with_effects()
+    final_video = final_video.with_effects([vfx.FadeIn(1.5)])
 
     # 6. Export
     output_filename = f"{author.replace(' ', '_').lower()}_short.mp4"
     final_video.write_videofile(output_filename, fps=24, codec="libx264")
     
-    # Clean up to save memory
+    # Clean up
     video_with_audio.close()
     final_video.close()
     bg_clip.close()
