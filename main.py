@@ -165,14 +165,53 @@ def create_quote_video(image_path, quotes, author):
     ]
     font_path = next((p for p in font_path_candidates if os.path.exists(p)), None)
 
-    # Render text to a temporary PNG using Pillow
+    # --- Robust text measurement helper (works across Pillow versions) ---
+    def measure_text(draw, text, font):
+        """
+        Return (width, height) of `text` using available APIs, in order:
+         - ImageDraw.textbbox
+         - ImageDraw.textsize
+         - ImageFont.getsize
+         - ImageFont.getbbox
+         - fallback heuristic
+        """
+        try:
+            # Pillow >= 8 has textbbox
+            bbox = draw.textbbox((0, 0), text, font=font)
+            w = bbox[2] - bbox[0]
+            h = bbox[3] - bbox[1]
+            return w, h
+        except Exception:
+            pass
+        try:
+            # older Pillow may have textsize on ImageDraw
+            ts = draw.textsize(text, font=font)
+            return ts[0], ts[1]
+        except Exception:
+            pass
+        try:
+            # ImageFont.getsize
+            gs = font.getsize(text)
+            return gs[0], gs[1]
+        except Exception:
+            pass
+        try:
+            bbox = font.getbbox(text)
+            w = bbox[2] - bbox[0]
+            h = bbox[3] - bbox[1]
+            return w, h
+        except Exception:
+            pass
+        # last resort heuristic
+        return (max(1, len(text)) * getattr(font, "size", 12), getattr(font, "size", 12))
+
+    # Render text to a temporary PNG using Pillow (auto-fit)
     def render_text_to_png(text, font_path, max_width_px, max_height_px,
                            initial_font=40, min_font=14, padding=36, line_spacing_mult=1.12):
         """
         Returns path to a temporary PNG with transparent background containing the rendered `text`.
         Auto-shrinks font to fit within max_height_px if needed.
         """
-        # Helper to load font (fallback to default)
         def load_font(size):
             try:
                 if font_path:
@@ -182,17 +221,20 @@ def create_quote_video(image_path, quotes, author):
             except Exception:
                 return ImageFont.load_default()
 
-        # Try font sizes from initial down to min
-        chosen = None
         chosen_font = None
         chosen_wrapped = None
+
+        # Try font sizes from initial down to min
         for fs in range(initial_font, min_font - 1, -2):
             font = load_font(fs)
-            # Estimate chars-per-line via average char width
+            # create small canvas to measure
             sample_img = Image.new("RGBA", (max(10, max_width_px), 10), (0, 0, 0, 0))
             draw = ImageDraw.Draw(sample_img)
-            avg_char_w = max(1, draw.textsize("M", font=font)[0])
-            chars_per_line = max(10, int(max_width_px / avg_char_w))
+
+            # estimate chars per line using an average char width
+            avg_char_w, _ = measure_text(draw, "M", font)
+            avg_char_w = max(1, avg_char_w)
+            chars_per_line = max(8, int(max_width_px / avg_char_w))
 
             wrapped = "\n".join(
                 textwrap.fill(line, width=chars_per_line,
@@ -200,42 +242,35 @@ def create_quote_video(image_path, quotes, author):
                 for line in text.split("\n")
             )
 
-            # Calculate height
+            # compute total height
             lines = wrapped.split("\n")
-            # Use font.getmetrics() when available
-            try:
-                ascent, descent = font.getmetrics()
-                sample_h = ascent + descent
-            except Exception:
-                sample_h = draw.textsize("Ay", font=font)[1]
-
+            # measure sample line height
+            _, sample_h = measure_text(draw, "Ay", font)
             line_height = int(sample_h * line_spacing_mult)
             total_h = padding * 2 + line_height * len(lines)
 
-            if total_h <= max_height_px:
-                chosen = fs
+            if total_h <= max_height_px or fs == min_font:
                 chosen_font = font
                 chosen_wrapped = wrapped
                 break
 
-            # keep last as fallback if none fit
-            chosen = fs
-            chosen_font = font
-            chosen_wrapped = wrapped
-
-        # Now build final image using chosen_font and chosen_wrapped
-        lines = chosen_wrapped.split("\n")
-        line_height = int((chosen_font.getmetrics()[0] + chosen_font.getmetrics()[1]) * line_spacing_mult) if hasattr(chosen_font, "getmetrics") else int(draw.textsize("Ay", font=chosen_font)[1] * line_spacing_mult)
-        img_h = padding * 2 + line_height * len(lines)
+        # Build final image
+        # ensure draw exists for final measurement
         img_w = max_width_px + padding * 2
+        lines = chosen_wrapped.split("\n")
+        # compute final line height
+        sample_img = Image.new("RGBA", (img_w, 10), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(sample_img)
+        _, sample_h = measure_text(draw, "Ay", chosen_font)
+        line_height = int(sample_h * line_spacing_mult)
+        img_h = padding * 2 + line_height * len(lines)
 
         img = Image.new("RGBA", (img_w, img_h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
 
         y = padding
-        # Draw each line centered; use stroke if supported
         for line in lines:
-            w, h = draw.textsize(line, font=chosen_font)
+            w, h = measure_text(draw, line, chosen_font)
             x = (img_w - w) // 2
             # Pillow stroke support (newer versions)
             try:
@@ -257,6 +292,7 @@ def create_quote_video(image_path, quotes, author):
     max_text_width = int(bg_clip.w * 0.80)
     max_text_height = int(bg_clip.h * 0.65)
     png_path = None
+    final_video = None
 
     try:
         png_path = render_text_to_png(
@@ -288,7 +324,8 @@ def create_quote_video(image_path, quotes, author):
         except Exception:
             pass
         try:
-            final_video.close()
+            if final_video:
+                final_video.close()
         except Exception:
             pass
         try:
@@ -306,7 +343,6 @@ def create_quote_video(image_path, quotes, author):
             pass
 
     return output_filename
-
 
 
 def get_youtube_tokens(filename=TOKEN_FILE):
