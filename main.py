@@ -74,46 +74,83 @@ with open("love_quotes.csv", newline="", encoding="utf-8") as infile:
 
 def save_author_image(author):
     print(f"Generating AI portrait for: {author}")
-    
+
     session = requests.Session()
-    # Add a real browser User-Agent to avoid 403 Forbidden errors
+
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Referer": "https://pollinations.ai/",
     })
 
+    # IMPORTANT:
+    # 403 should NOT be retried (WAF / permanent denial)
     retry_strategy = Retry(
-        total=5,
-        backoff_factor=3, # Increased wait time between retries
-        status_forcelist=[403, 429, 500, 502, 503, 504], 
+        total=4,
+        backoff_factor=2,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"],
+        raise_on_status=False,
     )
+
     adapter = HTTPAdapter(max_retries=retry_strategy)
     session.mount("https://", adapter)
 
-    prompt = f"Professional oil painting of the person {author}, centered portrait, dark academic style, moody lighting, 18th century, age 30, high detail, 9:16 aspect ratio"
-    encoded_prompt = quote(prompt)
-    
+    prompt = (
+        f"Professional oil painting of the person {author}, "
+        "centered portrait, dark academic style, moody lighting, "
+        "18th century, age 30, high detail"
+    )
+
     seed = os.urandom(4).hex()
-    # Updated URL structure using /p/ instead of /prompt/
-    image_url = f"https://image.pollinations.ai/p/{encoded_prompt}?width=720&height=1280&seed={seed}&nologo=true"
+
+    base_url = "https://image.pollinations.ai/p"
+
+    # Let requests encode parameters safely (NO quote())
+    params = {
+        "width": 720,
+        "height": 1280,
+        "seed": seed,
+        "nologo": "true",
+    }
 
     try:
-        response = session.get(image_url, timeout=60)
-        response.raise_for_status()
-        
+        response = session.get(
+            f"{base_url}/{prompt}",
+            params=params,
+            timeout=60,
+        )
+
+        # ---- DEBUG LOGGING (CRITICAL FOR GITHUB ACTIONS) ----
+        if response.status_code != 200:
+            print("Image generation failed")
+            print("STATUS:", response.status_code)
+            print("HEADERS:", dict(response.headers))
+            print("BODY PREVIEW:", response.text[:500])
+            response.raise_for_status()
+
+        if not response.content or len(response.content) < 1024:
+            raise RuntimeError("Received empty or invalid image data")
+
         safe_name = author.replace(" ", "_").lower()
         filename = f"{safe_name}_ai.jpg"
-        
+
         with open(filename, "wb") as f:
             f.write(response.content)
-            
+
         print(f"Successfully generated: {filename}")
         return filename
-        
+
     except Exception as e:
-        print(f"AI generation permanently failed for {author}: {e}")
+        print(f"AI generation failed for {author}")
+        print("ERROR:", str(e))
         os._exit(1)
         return None
+
 
 
 def create_quote_video(image_path, quotes, author):
