@@ -56,12 +56,13 @@ jobs:
       - name: Create token.json from secret
         run: |
           if [ -n "${{ secrets.YT_CONF_JSON }}" ]; then
-            echo '${{ secrets.YT_CONF_JSON }}' > token.json
-            echo "Full token.json successfully created from secret."
+            printf '%s' "${{ secrets.YT_CONF_JSON }}" > token.json
+            echo "token.json created from YT_CONF_JSON."
           else
             echo "Error: YT_CONF_JSON secret is missing!"
             exit 1
           fi
+
 
       - name: Run video uploader script
         run: |
