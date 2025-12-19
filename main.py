@@ -136,28 +136,59 @@ def create_quote_video(image_path, quotes, author):
     # v2.x use: .with_duration()
     bg_clip = ImageClip(image_path).with_duration(duration)
 
+    # choose font and desired max width on the background image
     font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    if not os.path.exists(font_path):
+        # try a fallback (adjust for your runner)
+        font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
-    text_clip = TextClip(
-        text=f'"{quotes}"\n\n— {author}',
-        font_size=27,
-        color='white',
-        font=font_path,  # Use the absolute path here
-        stroke_color='black',
-        stroke_width=0.5,
-        method='caption',
-        size=(int(bg_clip.w * 0.7), None),
-        text_align='center',
-        transparent=True,
-        cmd=[
+    max_text_width = int(bg_clip.w * 0.80)
+    font_size = 36
+    caption = f'"{quotes}"\n\n— {author}'
+
+    # Render the caption to a PNG using ImageMagick (explicitly disable hyphenation/word-break)
+    txt_tmp = tempfile.NamedTemporaryFile(delete=False, mode="w", encoding="utf-8", suffix=".txt")
+    txt_tmp.write(caption)
+    txt_tmp.close()
+
+    out_png = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    out_png.close()
+
+    # prefer IMAGEMAGICK_BINARY if set
+    im_bin = os.environ.get("IMAGEMAGICK_BINARY", "convert")
+
+    # build command: use "caption:@file" to read caption text from file and -define to stop hyphenation
+    cmd = [
+        im_bin,
+        "-size", f"{max_text_width}x",            # width x (height unspecified -> auto)
+        "-background", "none",
+        "-fill", "white",
+        "-font", font_path,
+        "-pointsize", str(font_size),
+        "-gravity", "center",
         "-define", "caption:word-break=false",
-        "-define", "caption:hyphenate=false"
+        "-define", "caption:hyphenate=false",
+        f"caption:@{txt_tmp.name}",
+        out_png.name
     ]
-    ).with_duration(duration).with_position('center')
 
-    # 4. Assemble the Video
-    # v2.x use: .with_audio()
-    final_video = CompositeVideoClip([bg_clip, text_clip])
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+    except subprocess.CalledProcessError as e:
+        print("ImageMagick failed:", e.stderr.decode(errors="ignore"))
+        # fallback: try without the -define flags (less ideal)
+        fallback_cmd = cmd[:]
+        try:
+            subprocess.run(fallback_cmd, check=True, timeout=30)
+        except Exception as e2:
+            print("ImageMagick fallback also failed:", e2)
+            raise
+
+    # Now use the generated PNG as an ImageClip (no TextClip at all)
+    text_img_clip = ImageClip(out_png.name).with_duration(duration).with_position("center")
+
+    # assemble final
+    final_video = CompositeVideoClip([bg_clip, text_img_clip])
     final_video = final_video.with_audio(audio_clip)
 
     # 5. Add Fade-In Effect
@@ -172,7 +203,6 @@ def create_quote_video(image_path, quotes, author):
     video_with_audio.close()
     final_video.close()
     bg_clip.close()
-    text_clip.close()
     audio_clip.close()
     
     return output_filename
