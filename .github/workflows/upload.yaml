@@ -33,20 +33,19 @@ jobs:
       - name: Install system packages (ffmpeg, ImageMagick, fonts)
         run: |
           sudo apt-get update -y
+          # Accept MS Font EULA automatically
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             ffmpeg \
             imagemagick \
             fonts-dejavu-core \
             ttf-mscorefonts-installer
           
-          # CRITICAL FIX: MoviePy requires ImageMagick permissions to write text.
-          # We use sed to change "none" to "read|write" for the LABEL and PATH coders.
+          # Fix ImageMagick Policy
           sudo sed -i '/<policy domain="coder" rights="none" pattern="LABEL" \/>/c\<policy domain="coder" rights="read|write" pattern="LABEL" \/>' /etc/ImageMagick-6/policy.xml
           
-          # debugging info
-          python -V
-          ffmpeg -version || true
-          convert -version || true
+          # Debug: List available DejaVu fonts to confirm the path
+          find /usr/share/fonts -name "*.ttf"
 
       - name: Install Python dependencies
         run: |

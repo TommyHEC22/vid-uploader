@@ -129,19 +129,19 @@ def create_quote_video(image_path, quotes, author):
     # 2. Create the Background Image Clip
     # v2.x use: .with_duration()
     bg_clip = ImageClip(image_path).with_duration(duration)
-    
-    # 3. Create the Text Overlay
-    # v2.x use: .with_duration() and .with_position()
+
+    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
     text_clip = TextClip(
         text=f'"{quotes}"\n\n— {author}',
-        font_size=30,             # fontsize -> font_size
+        font_size=30,
         color='white',
-        font='DejaVu-Sans-Bold',
+        font=font_path,  # Use the absolute path here
         stroke_color='black',
         stroke_width=0.5,
         method='caption',
         size=(bg_clip.w * 0.65, None),
-        text_align='center'       # align -> text_align
+        text_align='center'
     ).with_duration(duration).with_position('center')
 
     # 4. Assemble the Video
