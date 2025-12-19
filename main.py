@@ -140,14 +140,19 @@ def create_quote_video(image_path, quotes, author):
 
     text_clip = TextClip(
         text=f'"{quotes}"\n\n— {author}',
-        font_size=30,
+        font_size=27,
         color='white',
         font=font_path,  # Use the absolute path here
         stroke_color='black',
         stroke_width=0.5,
-        method='label',
+        method='caption',
         size=(int(bg_clip.w * 0.7), None),
-        text_align='center'
+        text_align='center',
+        transparent=True,
+        cmd=[
+        "-define", "caption:word-break=false",
+        "-define", "caption:hyphenate=false"
+    ]
     ).with_duration(duration).with_position('center')
 
     # 4. Assemble the Video
