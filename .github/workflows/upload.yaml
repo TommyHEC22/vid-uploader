@@ -1,3 +1,14 @@
+name: Auto Video Uploader
+
+# Runs hourly, on push to main (for quick testing), or manually.
+on:
+  schedule:
+    - cron: '0 * * * *'   # every hour at minute 0 (UTC)
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}
+
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
