@@ -53,13 +53,14 @@ jobs:
           # Force installation of MoviePy 2.0.0 if not specified in requirements.txt
           pip install --no-cache-dir -r requirements.txt
 
-      - name: Create minimal token.json from secret (runner-local)
+      - name: Create token.json from secret
         run: |
-          if [ -n "${{ secrets.YT_REFRESH_TOKEN }}" ]; then
-            printf '{"refresh_token":"%s"}' "${{ secrets.YT_REFRESH_TOKEN }}" > token.json
-            echo "token.json written"
+          if [ -n "${{ secrets.YT_CONF_JSON }}" ]; then
+            echo '${{ secrets.YT_CONF_JSON }}' > token.json
+            echo "Full token.json successfully created from secret."
           else
-            echo "No YT_REFRESH_TOKEN secret provided"
+            echo "Error: YT_CONF_JSON secret is missing!"
+            exit 1
           fi
 
       - name: Run video uploader script
