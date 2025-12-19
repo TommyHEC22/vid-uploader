@@ -146,7 +146,7 @@ def create_quote_video(image_path, quotes, author):
         stroke_color='black',
         stroke_width=0.5,
         method='caption',
-        size=(int(bg_clip.w * 0.65), None),
+        size=(int(bg_clip.w * 0.7), None),
         text_align='center'
     ).with_duration(duration).with_position('center')
 
@@ -351,6 +351,6 @@ def upload_to_youtube(video_path, quote_text, author, category):
 
 image_path = save_author_image(author)
 video = create_quote_video(image_path, quotes, author)
-video_id = upload_to_youtube(video, quotes, authors, category)
+#video_id = upload_to_youtube(video, quotes, authors, category)
 os.remove(image_path)
 os.remove(video)
