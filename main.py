@@ -193,6 +193,7 @@ def save_youtube_tokens(tokens, filename=TOKEN_FILE):
 
 def refresh_youtube_token(refresh_token):
     """Refresh YouTube access token — returns new token dict or None"""
+    print(f"Attempting to refresh token for Client ID: {YOUTUBE_CLIENT_ID[:10]}...")
     data = {
         "client_id": YOUTUBE_CLIENT_ID,
         "client_secret": YOUTUBE_CLIENT_SECRET,
