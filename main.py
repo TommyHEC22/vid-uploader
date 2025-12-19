@@ -49,7 +49,7 @@ else:
     print("No ImageMagick binary found on PATH (magick/convert).")
 
 
-from moviepy.editor import ImageClip, TextClip, CompositeVideoClip, VideoFileClip
+from moviepy import ImageClip, TextClip, CompositeVideoClip, VideoFileClip
 
 
 YOUTUBE_CLIENT_ID = os.environ.get("YOUTUBE_CLIENT_ID")
