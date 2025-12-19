@@ -75,27 +75,29 @@ with open("love_quotes.csv", newline="", encoding="utf-8") as infile:
 def save_author_image(author):
     print(f"Generating AI portrait for: {author}")
     
-    # 1. Setup a "Smart" Session that retries automatically on 502/Timeout
     session = requests.Session()
+    # Add a real browser User-Agent to avoid 403 Forbidden errors
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+    })
+
     retry_strategy = Retry(
-        total=5, # Try 5 times
-        backoff_factor=2, # Wait 2s, 4s, 8s between retries
-        status_forcelist=[429, 500, 502, 503, 504], # Retry on these errors
+        total=5,
+        backoff_factor=3, # Increased wait time between retries
+        status_forcelist=[403, 429, 500, 502, 503, 504], 
     )
     adapter = HTTPAdapter(max_retries=retry_strategy)
     session.mount("https://", adapter)
 
-    # 2. Refined Prompt for better consistency
-    # Adding "oil painting" and "centered portrait" helps the AI
     prompt = f"Professional oil painting of the person {author}, centered portrait, dark academic style, moody lighting, 18th century, age 30, high detail, 9:16 aspect ratio"
     encoded_prompt = quote(prompt)
     
-    # We add a random seed each time so if one fails, the next attempt is 'fresh'
     seed = os.urandom(4).hex()
-    image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=720&height=1280&seed={seed}&nologo=true"
+    # Updated URL structure using /p/ instead of /prompt/
+    image_url = f"https://image.pollinations.ai/p/{encoded_prompt}?width=720&height=1280&seed={seed}&nologo=true"
 
     try:
-        # We increase the timeout to 60s because AI generation is slow
         response = session.get(image_url, timeout=60)
         response.raise_for_status()
         
