@@ -515,6 +515,6 @@ def upload_to_youtube(video_path, quote_text, author, category):
 
 image_path = save_author_image(author)
 video = create_quote_video(image_path, quotes, author)
-#video_id = upload_to_youtube(video, quotes, authors, category)
+video_id = upload_to_youtube(video, quotes, authors, category)
 os.remove(image_path)
-#os.remove(video)
+os.remove(video)
