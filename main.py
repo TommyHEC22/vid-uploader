@@ -64,7 +64,7 @@ REFRESH_TOKEN_ENV = require_env("YT_REFRESH_TOKEN")
 TOKEN_FILE = "token.json"
 
 
-with open("love_quotes.csv", newline="", encoding="utf-8") as infile:
+with open("short_love_quotes.csv", newline="", encoding="utf-8") as infile:
     reader = csv.reader(infile)
     quotes = list(reader)
     random_quote = random.choice(quotes)
@@ -203,7 +203,7 @@ def create_quote_video(image_path, quotes, author):
 
     # Render text to a temporary PNG using Pillow (auto-fit)
     def render_text_to_png(text, font_path, max_width_px, max_height_px,
-                           initial_font=18, min_font=12, padding=36, line_spacing_mult=1.12):
+                           initial_font=24, min_font=12, padding=36, line_spacing_mult=1.12):
         """
         Returns path to a temporary PNG with transparent background containing the rendered `text`.
         Auto-shrinks font to fit within max_height_px if needed.
