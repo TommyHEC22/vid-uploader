@@ -3,7 +3,7 @@ name: Auto Video Uploader
 # Runs hourly, on push to main (for quick testing), or manually.
 on:
   schedule:
-    - cron: '0 */6 * * *'   
+    - cron: '0 */3 * * *'   
   workflow_dispatch:
 
 jobs:
